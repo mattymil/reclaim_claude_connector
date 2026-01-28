@@ -139,10 +139,24 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       integration: new apigatewayv2_integrations.HttpLambdaIntegration('AuthorizeIntegration', authorizeLambda),
     });
 
+    // Claude expects /authorize at root
+    httpApi.addRoutes({
+      path: '/authorize',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration: new apigatewayv2_integrations.HttpLambdaIntegration('AuthorizeRootIntegration', authorizeLambda),
+    });
+
     httpApi.addRoutes({
       path: '/oauth/token',
       methods: [apigatewayv2.HttpMethod.POST],
       integration: new apigatewayv2_integrations.HttpLambdaIntegration('TokenIntegration', tokenLambda),
+    });
+
+    // Claude expects /token at root
+    httpApi.addRoutes({
+      path: '/token',
+      methods: [apigatewayv2.HttpMethod.POST],
+      integration: new apigatewayv2_integrations.HttpLambdaIntegration('TokenRootIntegration', tokenLambda),
     });
 
     httpApi.addRoutes({

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS-based connector that enables Claude to create tasks in Reclaim.ai via OAuth 2.0 authenticated API endpoints. Designed as an MCP (Model Context Protocol) integration.
 
-**Status:** CDK infrastructure ready, Lambda handlers pending implementation.
+**Status:** Fully implemented and deployed.
 
 ## Architecture
 
@@ -39,9 +39,14 @@ duration_minutes → timeChunksRequired (divide by 15)
 duration_minutes → minChunkSize (divide by 15)
 duration_minutes → maxChunkSize (divide by 15)
 category → eventCategory
+priority: CRITICAL→P1, HIGH→P2, MEDIUM→P3, LOW→P4
 ```
 
 `duration_minutes` must be divisible by 15.
+
+### Live Endpoint
+
+**API Base:** `https://r6y21n5qee.execute-api.us-east-1.amazonaws.com`
 
 ### Environment Variables
 

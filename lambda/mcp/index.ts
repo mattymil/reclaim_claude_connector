@@ -417,14 +417,70 @@ async function updateReclaimTask(
     return jsonRpcError(requestId, -32602, 'Invalid params: task_id is required');
   }
 
-  // Build update request with only provided fields
+  const reclaimApiKey = await getSecret(process.env.RECLAIM_SECRET_NAME!);
+
+  // Handle status changes via dedicated endpoints
+  // Reclaim uses special endpoints for marking tasks complete/incomplete
+  if (status) {
+    let statusEndpoint: string | null = null;
+    let statusAction: string = '';
+
+    switch (status) {
+      case 'COMPLETE':
+        statusEndpoint = `https://api.app.reclaim.ai/api/planner/done/task/${task_id}`;
+        statusAction = 'marked complete';
+        break;
+      case 'NEW':
+      case 'SCHEDULED':
+        // Unarchive returns task to active state
+        statusEndpoint = `https://api.app.reclaim.ai/api/planner/unarchive/task/${task_id}`;
+        statusAction = 'restored to active';
+        break;
+      case 'CANCELLED':
+        // Try the delete/cancel endpoint
+        statusEndpoint = `https://api.app.reclaim.ai/api/tasks/${task_id}`;
+        statusAction = 'cancelled';
+        break;
+    }
+
+    if (statusEndpoint && status !== 'CANCELLED') {
+      const statusResponse = await fetch(statusEndpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${reclaimApiKey}`,
+        },
+      });
+
+      if (!statusResponse.ok) {
+        const errorText = await statusResponse.text();
+        console.error(`Reclaim status API error: ${statusResponse.status} - ${errorText}`);
+        return jsonRpcError(requestId, -32603, `Reclaim API error changing status: ${statusResponse.status}`);
+      }
+
+      // If only status was being changed, return success
+      const hasOtherUpdates = title || notes !== undefined || due || schedule_after || duration_minutes !== undefined || priority;
+      if (!hasOtherUpdates) {
+        const task = await statusResponse.json() as { id: number; title: string; status: string };
+        console.log(`Task ${task.id} ${statusAction}`);
+        return jsonRpcSuccess(requestId, {
+          content: [
+            {
+              type: 'text',
+              text: `Task ${statusAction} successfully!\n\nID: ${task.id}\nTitle: ${task.title}\nStatus: ${task.status}`,
+            },
+          ],
+        });
+      }
+    }
+  }
+
+  // Build update request with only provided fields (excluding status which is handled above)
   const updateRequest: Record<string, unknown> = {};
 
   if (title) updateRequest.title = title.trim();
   if (notes !== undefined) updateRequest.notes = notes;
   if (due) updateRequest.due = due;
   if (schedule_after) updateRequest.snoozeUntil = schedule_after;
-  if (status) updateRequest.status = status;
 
   if (duration_minutes !== undefined) {
     if (duration_minutes % 15 !== 0) {
@@ -444,7 +500,10 @@ async function updateReclaimTask(
     updateRequest.priority = PRIORITY_MAP[priority];
   }
 
-  const reclaimApiKey = await getSecret(process.env.RECLAIM_SECRET_NAME!);
+  // Only make PATCH request if there are fields to update
+  if (Object.keys(updateRequest).length === 0) {
+    return jsonRpcError(requestId, -32602, 'Invalid params: no fields to update');
+  }
 
   const response = await fetch(`https://api.app.reclaim.ai/api/tasks/${task_id}`, {
     method: 'PATCH',

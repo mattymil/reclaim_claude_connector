@@ -168,6 +168,24 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: 'get_scheduled_tasks',
+    description: 'Get tasks that are scheduled on the calendar within a date range, showing their actual scheduled times (not just due dates)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          description: 'Start of date range in ISO 8601 format (default: today)',
+        },
+        end_date: {
+          type: 'string',
+          description: 'End of date range in ISO 8601 format (default: 7 days from start)',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // Server info
@@ -306,6 +324,8 @@ async function handleToolsCall(request: JsonRpcRequest): Promise<APIGatewayProxy
       return listReclaimTasks(request.id, params.arguments || {});
     case 'search_reclaim_tasks':
       return searchReclaimTasks(request.id, params.arguments || {});
+    case 'get_scheduled_tasks':
+      return getScheduledTasks(request.id, params.arguments || {});
     default:
       return jsonRpcError(request.id, -32602, `Unknown tool: ${params.name}`);
   }
@@ -751,6 +771,130 @@ async function searchReclaimTasks(
   const summary = tasks.length === 0
     ? `${filterSummary}No tasks found matching your criteria.`
     : `${filterSummary}Found ${tasks.length} task(s):\n\n${taskList}`;
+
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: summary,
+      },
+    ],
+  });
+}
+
+interface CalendarEvent {
+  eventId: string;
+  title: string;
+  eventStart: string;
+  eventEnd: string;
+  task?: {
+    id: number;
+    title: string;
+    status: string;
+    priority: string;
+    eventCategory: string;
+    timeChunksRequired: number;
+  };
+}
+
+async function getScheduledTasks(
+  requestId: string | number,
+  args: Record<string, unknown>
+): Promise<APIGatewayProxyResultV2> {
+  const { start_date, end_date } = args as {
+    start_date?: string;
+    end_date?: string;
+  };
+
+  const reclaimApiKey = await getSecret(process.env.RECLAIM_SECRET_NAME!);
+
+  // Default to today if no start date
+  const startDate = start_date || new Date().toISOString().split('T')[0];
+
+  // Default to 7 days from start if no end date
+  let endDate = end_date;
+  if (!endDate) {
+    const end = new Date(startDate);
+    end.setDate(end.getDate() + 7);
+    endDate = end.toISOString().split('T')[0];
+  }
+
+  // Query the events endpoint to get scheduled task events
+  const params = new URLSearchParams();
+  params.append('start', startDate);
+  params.append('end', endDate);
+
+  const url = `https://api.app.reclaim.ai/api/events?${params.toString()}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${reclaimApiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Reclaim events API error: ${response.status} - ${errorText}`);
+    return jsonRpcError(requestId, -32603, `Reclaim API error: ${response.status}`);
+  }
+
+  const events = await response.json() as CalendarEvent[];
+
+  // Filter to only task events (events that have a task property)
+  const taskEvents = events.filter(e => e.task);
+
+  // Group events by task ID to show all scheduled times per task
+  const taskMap = new Map<number, { task: CalendarEvent['task']; events: Array<{ start: string; end: string }> }>();
+
+  for (const event of taskEvents) {
+    if (!event.task) continue;
+
+    const taskId = event.task.id;
+    if (!taskMap.has(taskId)) {
+      taskMap.set(taskId, {
+        task: event.task,
+        events: [],
+      });
+    }
+    taskMap.get(taskId)!.events.push({
+      start: event.eventStart,
+      end: event.eventEnd,
+    });
+  }
+
+  // Sort events within each task by start time
+  for (const entry of taskMap.values()) {
+    entry.events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  }
+
+  // Format output
+  const taskList = Array.from(taskMap.values()).map(({ task, events: taskEventList }) => {
+    if (!task) return '';
+
+    const priorityLabel = PRIORITY_REVERSE_MAP[task.priority] || task.priority;
+    const duration = task.timeChunksRequired * 15;
+
+    let line = `• [${task.id}] ${task.title}`;
+    line += `\n  Status: ${task.status} | Priority: ${priorityLabel} | Category: ${task.eventCategory}`;
+    line += `\n  Total duration: ${duration}min`;
+    line += `\n  Scheduled times:`;
+
+    for (const evt of taskEventList) {
+      const startDt = new Date(evt.start);
+      const endDt = new Date(evt.end);
+      const dateStr = startDt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const startTime = startDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const endTime = endDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      line += `\n    - ${dateStr}: ${startTime} - ${endTime}`;
+    }
+
+    return line;
+  }).filter(Boolean).join('\n\n');
+
+  const summary = taskMap.size === 0
+    ? `No tasks scheduled between ${startDate} and ${endDate}.`
+    : `Tasks scheduled between ${startDate} and ${endDate}:\n\n${taskList}`;
 
   return jsonRpcSuccess(requestId, {
     content: [

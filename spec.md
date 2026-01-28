@@ -123,7 +123,7 @@ Authorization: Bearer {RECLAIM_API_KEY}
 
 ### Task Creation Endpoint
 
-**Endpoint:** `POST https://api.reclaim.ai/api/tasks`
+**Endpoint:** `POST https://api.app.reclaim.ai/api/tasks`
 
 **Request Body Schema:**
 ```json

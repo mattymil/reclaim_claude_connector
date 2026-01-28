@@ -743,11 +743,11 @@ async function searchReclaimTasks(
     line += `\n  Duration: ${duration}min${spent > 0 ? ` (${spent}min spent)` : ''}`;
     if (t.due) {
       const dueDate = new Date(t.due);
-      line += `\n  Due: ${dueDate.toLocaleDateString()} ${dueDate.toLocaleTimeString()}`;
+      line += `\n  Due: ${dueDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' })} ${dueDate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}`;
     }
     if (t.snoozeUntil) {
       const snoozeDate = new Date(t.snoozeUntil);
-      line += `\n  Schedule after: ${snoozeDate.toLocaleDateString()}`;
+      line += `\n  Schedule after: ${snoozeDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' })}`;
     }
     if (t.notes) {
       const truncatedNotes = t.notes.length > 100 ? t.notes.substring(0, 100) + '...' : t.notes;
@@ -904,9 +904,9 @@ async function getScheduledTasks(
       for (const evt of taskEventList) {
         const startDt = new Date(evt.start);
         const endDt = new Date(evt.end);
-        const dateStr = startDt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        const startTime = startDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-        const endTime = endDt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const dateStr = startDt.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' });
+        const startTime = startDt.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+        const endTime = endDt.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
         line += `\n    - ${dateStr}: ${startTime} - ${endTime}`;
       }
 

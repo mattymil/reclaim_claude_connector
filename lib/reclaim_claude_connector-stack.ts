@@ -18,7 +18,8 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      timeToLiveAttribute: 'refresh_expires_at', // Use refresh token expiry (30 days) for TTL
+      // TTL disabled via CLI - will be re-enabled on refresh_expires_at after cooldown period
+      // timeToLiveAttribute: 'refresh_expires_at',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 

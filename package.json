@@ -1,0 +1,31 @@
+{
+  "name": "reclaim_claude_connector",
+  "version": "0.1.0",
+  "bin": {
+    "reclaim_claude_connector": "bin/reclaim_claude_connector.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.160",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^24.10.1",
+    "aws-cdk": "2.1100.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.975.0",
+    "@aws-sdk/client-secrets-manager": "^3.975.0",
+    "@aws-sdk/lib-dynamodb": "^3.975.0",
+    "aws-cdk-lib": "2.232.1",
+    "constructs": "^10.0.0",
+    "esbuild": "^0.27.2"
+  }
+}

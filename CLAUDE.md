@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS-based connector that enables Claude to create tasks in Reclaim.ai via OAuth 2.0 authenticated API endpoints. Designed as an MCP (Model Context Protocol) integration.
 
-**Status:** Specification complete (`spec.md`), implementation pending.
+**Status:** CDK infrastructure ready, Lambda handlers pending implementation.
 
 ## Architecture
 
@@ -52,13 +52,15 @@ category → eventCategory
 
 ## Build & Deploy Commands
 
-Infrastructure should be deployed via AWS CDK:
-
 ```bash
-npm install
-npm run build
-npm run deploy    # Deploy CDK stack to AWS
-npm run test
+npm install          # Install dependencies
+npm run build        # Compile TypeScript
+npm run test         # Run tests
+
+# CDK commands (use ASON profile)
+cdk synth --profile ASON    # Generate CloudFormation template
+cdk diff --profile ASON     # Preview changes
+cdk deploy --profile ASON   # Deploy to AWS
 ```
 
 ## API Endpoints
@@ -66,7 +68,6 @@ npm run test
 | Endpoint | Method | Handler |
 |----------|--------|---------|
 | `/oauth/authorize` | GET | Authorization Lambda |
-| `/oauth/callback` | GET | Authorization Lambda |
 | `/oauth/token` | POST | Token Lambda |
 | `/oauth/revoke` | POST | Token Lambda |
 | `/mcp/reclaim/task` | POST | Task Lambda |

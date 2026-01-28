@@ -96,6 +96,19 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       },
     });
 
+    const mcpLambda = new NodejsFunction(this, 'McpLambda', {
+      functionName: 'reclaim-connector-mcp',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, '../lambda/mcp/index.ts'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        RECLAIM_SECRET_NAME: reclaimApiKeySecret.secretName,
+        TOKENS_TABLE_NAME: tokensTable.tableName,
+      },
+    });
+
     // Grant permissions
     tokensTable.grantReadWriteData(tokenLambda);
     tokensTable.grantReadWriteData(authorizeLambda);
@@ -104,6 +117,8 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
     tokensTable.grantReadData(taskLambda);
 
     reclaimApiKeySecret.grantRead(taskLambda);
+    reclaimApiKeySecret.grantRead(mcpLambda);
+    tokensTable.grantReadData(mcpLambda);
     oauthConfigSecret.grantRead(authorizeLambda);
     oauthConfigSecret.grantRead(tokenLambda);
 
@@ -142,6 +157,12 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       integration: new apigatewayv2_integrations.HttpLambdaIntegration('TaskIntegration', taskLambda),
     });
 
+    httpApi.addRoutes({
+      path: '/mcp',
+      methods: [apigatewayv2.HttpMethod.POST, apigatewayv2.HttpMethod.OPTIONS],
+      integration: new apigatewayv2_integrations.HttpLambdaIntegration('McpIntegration', mcpLambda),
+    });
+
     // Outputs
     new cdk.CfnOutput(this, 'ApiEndpoint', {
       value: httpApi.apiEndpoint,
@@ -161,6 +182,11 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TaskUrl', {
       value: `${httpApi.apiEndpoint}/mcp/reclaim/task`,
       description: 'Task creation endpoint URL',
+    });
+
+    new cdk.CfnOutput(this, 'McpServerUrl', {
+      value: `${httpApi.apiEndpoint}/mcp`,
+      description: 'MCP server URL for Claude connector',
     });
   }
 }

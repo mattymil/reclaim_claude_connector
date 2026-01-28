@@ -822,6 +822,13 @@ async function getScheduledTasks(
       endDate = end.toISOString().split('T')[0];
     }
 
+    // If start and end are the same day, adjust end to next day to cover full day
+    if (endDate === startDate) {
+      const end = new Date(startDate);
+      end.setDate(end.getDate() + 1);
+      endDate = end.toISOString().split('T')[0];
+    }
+
     // Query the events endpoint to get scheduled task events
     const params = new URLSearchParams();
     params.append('start', startDate);

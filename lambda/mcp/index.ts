@@ -23,7 +23,7 @@ const TOOLS = [
         priority: {
           type: 'string',
           enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
-          description: 'Task priority level',
+          description: 'Task priority level (default: LOW)',
         },
         category: {
           type: 'string',
@@ -43,7 +43,7 @@ const TOOLS = [
           description: 'Don\'t schedule this task before this date/time - ISO 8601 format (optional)',
         },
       },
-      required: ['title', 'duration_minutes', 'priority', 'category'],
+      required: ['title', 'duration_minutes', 'category'],
     },
   },
 ];
@@ -195,7 +195,8 @@ async function createReclaimTask(
   }
 
   const validPriorities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-  if (!priority || !validPriorities.includes(priority)) {
+  const taskPriority = priority || 'LOW'; // Default to LOW
+  if (!validPriorities.includes(taskPriority)) {
     return jsonRpcError(requestId, -32602, `Invalid params: priority must be one of ${validPriorities.join(', ')}`);
   }
 
@@ -220,7 +221,8 @@ async function createReclaimTask(
     timeChunksRequired: timeChunks,
     minChunkSize: timeChunks,
     maxChunkSize: timeChunks,
-    priority: priorityMap[priority],
+    priority: priorityMap[taskPriority],
+    alwaysPrivate: true, // Default to private
   };
 
   if (notes) {

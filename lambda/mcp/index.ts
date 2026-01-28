@@ -113,6 +113,61 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: 'search_reclaim_tasks',
+    description: 'Search for tasks in Reclaim.ai with flexible filtering by title, status, priority, category, and more',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search text to match against task titles (case-insensitive)',
+        },
+        status: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: ['NEW', 'SCHEDULED', 'IN_PROGRESS', 'COMPLETE', 'CANCELLED'],
+          },
+          description: 'Filter by one or more task statuses',
+        },
+        priority: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
+          },
+          description: 'Filter by one or more priority levels',
+        },
+        category: {
+          type: 'string',
+          enum: ['WORK', 'PERSONAL'],
+          description: 'Filter by task category',
+        },
+        has_due_date: {
+          type: 'boolean',
+          description: 'Filter to tasks that have (true) or do not have (false) a due date',
+        },
+        due_before: {
+          type: 'string',
+          description: 'Filter to tasks due before this date (ISO 8601 format)',
+        },
+        due_after: {
+          type: 'string',
+          description: 'Filter to tasks due after this date (ISO 8601 format)',
+        },
+        include_completed: {
+          type: 'boolean',
+          description: 'Include completed and cancelled tasks in results (default: false)',
+        },
+        limit: {
+          type: 'integer',
+          description: 'Maximum number of results to return (default: 50)',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // Server info
@@ -249,6 +304,8 @@ async function handleToolsCall(request: JsonRpcRequest): Promise<APIGatewayProxy
       return updateReclaimTask(request.id, params.arguments || {});
     case 'list_reclaim_tasks':
       return listReclaimTasks(request.id, params.arguments || {});
+    case 'search_reclaim_tasks':
+      return searchReclaimTasks(request.id, params.arguments || {});
     default:
       return jsonRpcError(request.id, -32602, `Unknown tool: ${params.name}`);
   }
@@ -473,6 +530,168 @@ async function listReclaimTasks(
   const summary = tasks.length === 0
     ? 'No tasks found.'
     : `Found ${tasks.length} task(s):\n\n${taskList}`;
+
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: summary,
+      },
+    ],
+  });
+}
+
+interface ReclaimTask {
+  id: number;
+  title: string;
+  status: string;
+  priority: string;
+  eventCategory: string;
+  timeChunksRequired: number;
+  timeChunksSpent?: number;
+  due?: string;
+  snoozeUntil?: string;
+  notes?: string;
+  created?: string;
+  updated?: string;
+}
+
+async function searchReclaimTasks(
+  requestId: string | number,
+  args: Record<string, unknown>
+): Promise<APIGatewayProxyResultV2> {
+  const {
+    query,
+    status,
+    priority,
+    category,
+    has_due_date,
+    due_before,
+    due_after,
+    include_completed,
+    limit,
+  } = args as {
+    query?: string;
+    status?: string[];
+    priority?: string[];
+    category?: string;
+    has_due_date?: boolean;
+    due_before?: string;
+    due_after?: string;
+    include_completed?: boolean;
+    limit?: number;
+  };
+
+  const reclaimApiKey = await getSecret(process.env.RECLAIM_SECRET_NAME!);
+
+  // Fetch all tasks from the API
+  const response = await fetch('https://api.app.reclaim.ai/api/tasks', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${reclaimApiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Reclaim API error: ${response.status} - ${errorText}`);
+    return jsonRpcError(requestId, -32603, `Reclaim API error: ${response.status}`);
+  }
+
+  let tasks = await response.json() as ReclaimTask[];
+
+  // Apply filters client-side for flexibility
+
+  // Filter by title query (case-insensitive)
+  if (query) {
+    const lowerQuery = query.toLowerCase();
+    tasks = tasks.filter(t => t.title.toLowerCase().includes(lowerQuery));
+  }
+
+  // Filter by status
+  if (status && status.length > 0) {
+    tasks = tasks.filter(t => status.includes(t.status));
+  } else if (!include_completed) {
+    // By default, exclude completed and cancelled tasks
+    tasks = tasks.filter(t => !['COMPLETE', 'CANCELLED'].includes(t.status));
+  }
+
+  // Filter by priority (convert to P1-P4 format)
+  if (priority && priority.length > 0) {
+    const apiPriorities = priority.map(p => PRIORITY_MAP[p]).filter(Boolean);
+    tasks = tasks.filter(t => apiPriorities.includes(t.priority));
+  }
+
+  // Filter by category
+  if (category) {
+    tasks = tasks.filter(t => t.eventCategory === category);
+  }
+
+  // Filter by due date existence
+  if (has_due_date !== undefined) {
+    tasks = tasks.filter(t => has_due_date ? !!t.due : !t.due);
+  }
+
+  // Filter by due date range
+  if (due_before) {
+    const dueBefore = new Date(due_before).getTime();
+    tasks = tasks.filter(t => {
+      if (!t.due) return false;
+      return new Date(t.due).getTime() < dueBefore;
+    });
+  }
+
+  if (due_after) {
+    const dueAfter = new Date(due_after).getTime();
+    tasks = tasks.filter(t => {
+      if (!t.due) return false;
+      return new Date(t.due).getTime() > dueAfter;
+    });
+  }
+
+  // Apply limit
+  const maxResults = limit && limit > 0 ? Math.min(limit, 100) : 50;
+  tasks = tasks.slice(0, maxResults);
+
+  // Format tasks for display with more detail
+  const taskList = tasks.map(t => {
+    const priorityLabel = PRIORITY_REVERSE_MAP[t.priority] || t.priority;
+    const duration = t.timeChunksRequired * 15;
+    const spent = t.timeChunksSpent ? t.timeChunksSpent * 15 : 0;
+
+    let line = `• [${t.id}] ${t.title}`;
+    line += `\n  Status: ${t.status} | Priority: ${priorityLabel} | Category: ${t.eventCategory}`;
+    line += `\n  Duration: ${duration}min${spent > 0 ? ` (${spent}min spent)` : ''}`;
+    if (t.due) {
+      const dueDate = new Date(t.due);
+      line += `\n  Due: ${dueDate.toLocaleDateString()} ${dueDate.toLocaleTimeString()}`;
+    }
+    if (t.snoozeUntil) {
+      const snoozeDate = new Date(t.snoozeUntil);
+      line += `\n  Schedule after: ${snoozeDate.toLocaleDateString()}`;
+    }
+    if (t.notes) {
+      const truncatedNotes = t.notes.length > 100 ? t.notes.substring(0, 100) + '...' : t.notes;
+      line += `\n  Notes: ${truncatedNotes}`;
+    }
+    return line;
+  }).join('\n\n');
+
+  // Build filter summary
+  const filters: string[] = [];
+  if (query) filters.push(`title contains "${query}"`);
+  if (status && status.length > 0) filters.push(`status: ${status.join(', ')}`);
+  if (priority && priority.length > 0) filters.push(`priority: ${priority.join(', ')}`);
+  if (category) filters.push(`category: ${category}`);
+  if (has_due_date !== undefined) filters.push(has_due_date ? 'has due date' : 'no due date');
+  if (due_before) filters.push(`due before ${due_before}`);
+  if (due_after) filters.push(`due after ${due_after}`);
+
+  const filterSummary = filters.length > 0 ? `Filters: ${filters.join(', ')}\n\n` : '';
+
+  const summary = tasks.length === 0
+    ? `${filterSummary}No tasks found matching your criteria.`
+    : `${filterSummary}Found ${tasks.length} task(s):\n\n${taskList}`;
 
   return jsonRpcSuccess(requestId, {
     content: [

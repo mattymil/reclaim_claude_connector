@@ -298,6 +298,90 @@ export async function deleteAuthCode(code: string): Promise<void> {
   );
 }
 
+// GTD Inbox helpers
+export interface InboxItem {
+  pk: string;
+  sk: string;
+  title: string;
+  notes?: string;
+  created_at: number;
+  processed: boolean;
+}
+
+export async function saveInboxItem(
+  userId: string,
+  title: string,
+  notes?: string
+): Promise<{ id: string }> {
+  const tableName = process.env.INBOX_TABLE_NAME!;
+  const now = Date.now();
+  const sk = `INBOX#${now}`;
+
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        pk: `USER#${userId}`,
+        sk,
+        title,
+        notes: notes || null,
+        created_at: now,
+        processed: false,
+      },
+    })
+  );
+
+  return { id: sk };
+}
+
+export async function getInboxItems(
+  userId: string,
+  includeProcessed: boolean = false
+): Promise<InboxItem[]> {
+  const tableName = process.env.INBOX_TABLE_NAME!;
+  const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
+
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+      FilterExpression: includeProcessed ? undefined : 'processed = :processed',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':prefix': 'INBOX#',
+        ...(includeProcessed ? {} : { ':processed': false }),
+      },
+      ScanIndexForward: true, // Oldest first (FIFO)
+    })
+  );
+
+  return (result.Items || []) as InboxItem[];
+}
+
+export async function getNextInboxItem(userId: string): Promise<InboxItem | null> {
+  const items = await getInboxItems(userId, false);
+  return items.length > 0 ? items[0] : null;
+}
+
+export async function markInboxItemProcessed(
+  userId: string,
+  sk: string
+): Promise<void> {
+  const tableName = process.env.INBOX_TABLE_NAME!;
+  const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
+
+  await docClient.send(
+    new UpdateCommand({
+      TableName: tableName,
+      Key: { pk: `USER#${userId}`, sk },
+      UpdateExpression: 'SET processed = :processed',
+      ExpressionAttributeValues: {
+        ':processed': true,
+      },
+    })
+  );
+}
+
 // Response helpers
 export function jsonResponse(statusCode: number, body: object): {
   statusCode: number;

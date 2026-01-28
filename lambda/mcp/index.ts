@@ -2,6 +2,11 @@ import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import {
   getSecret,
   getTokenByAccessToken,
+  saveInboxItem,
+  getInboxItems,
+  getNextInboxItem,
+  markInboxItemProcessed,
+  InboxItem,
 } from '../shared/utils';
 
 // MCP Tool Definitions
@@ -186,6 +191,62 @@ const TOOLS = [
       required: [],
     },
   },
+  // GTD Inbox tools
+  {
+    name: 'add_to_inbox',
+    description: 'Quick capture a task idea to the GTD inbox for later processing. Use this for rapid capture without needing to specify task details like duration or priority.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Brief description of the task or idea',
+        },
+        notes: {
+          type: 'string',
+          description: 'Additional context or details (optional)',
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'list_inbox',
+    description: 'List all items in the GTD inbox that have not been processed yet',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        include_processed: {
+          type: 'boolean',
+          description: 'Include already processed items (default: false)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_next_inbox_item',
+    description: 'Get the next (oldest) unprocessed item from the GTD inbox for processing into a Reclaim task',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'mark_inbox_processed',
+    description: 'Mark an inbox item as processed after it has been converted to a Reclaim task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: {
+          type: 'string',
+          description: 'The ID of the inbox item to mark as processed (the sk value)',
+        },
+      },
+      required: ['item_id'],
+    },
+  },
 ];
 
 // Server info
@@ -282,7 +343,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       case 'tools/list':
         return handleToolsList(request);
       case 'tools/call':
-        return handleToolsCall(request);
+        return handleToolsCall(request, tokenData.pk);
       case 'ping':
         return jsonRpcSuccess(request.id, {});
       default:
@@ -308,7 +369,7 @@ function handleToolsList(request: JsonRpcRequest): APIGatewayProxyResultV2 {
   });
 }
 
-async function handleToolsCall(request: JsonRpcRequest): Promise<APIGatewayProxyResultV2> {
+async function handleToolsCall(request: JsonRpcRequest, userPk: string): Promise<APIGatewayProxyResultV2> {
   const params = request.params as { name: string; arguments: Record<string, unknown> } | undefined;
 
   if (!params?.name) {
@@ -326,6 +387,14 @@ async function handleToolsCall(request: JsonRpcRequest): Promise<APIGatewayProxy
       return searchReclaimTasks(request.id, params.arguments || {});
     case 'get_scheduled_tasks':
       return getScheduledTasks(request.id, params.arguments || {});
+    case 'add_to_inbox':
+      return addToInbox(request.id, params.arguments || {}, userPk);
+    case 'list_inbox':
+      return listInbox(request.id, params.arguments || {}, userPk);
+    case 'get_next_inbox_item':
+      return getNextInboxItemHandler(request.id, userPk);
+    case 'mark_inbox_processed':
+      return markInboxProcessedHandler(request.id, params.arguments || {}, userPk);
     default:
       return jsonRpcError(request.id, -32602, `Unknown tool: ${params.name}`);
   }
@@ -935,6 +1004,182 @@ async function getScheduledTasks(
   } catch (error) {
     console.error('getScheduledTasks error:', error);
     return jsonRpcError(requestId, -32603, `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+// GTD Inbox handlers
+async function addToInbox(
+  requestId: string | number,
+  args: Record<string, unknown>,
+  userPk: string
+): Promise<APIGatewayProxyResultV2> {
+  const { title, notes } = args as {
+    title?: string;
+    notes?: string;
+  };
+
+  if (!title || typeof title !== 'string') {
+    return jsonRpcError(requestId, -32602, 'Invalid params: title is required');
+  }
+
+  // Extract userId from pk (format: USER#userId)
+  const userId = userPk.replace('USER#', '');
+
+  try {
+    const { id } = await saveInboxItem(userId, title.trim(), notes?.trim());
+    console.log(`Inbox item added: ${id} - "${title}"`);
+
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: `Added to inbox!\n\nTitle: ${title}${notes ? `\nNotes: ${notes}` : ''}`,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error('addToInbox error:', error);
+    return jsonRpcError(requestId, -32603, `Failed to add to inbox: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function listInbox(
+  requestId: string | number,
+  args: Record<string, unknown>,
+  userPk: string
+): Promise<APIGatewayProxyResultV2> {
+  const { include_processed } = args as {
+    include_processed?: boolean;
+  };
+
+  const userId = userPk.replace('USER#', '');
+
+  try {
+    const items = await getInboxItems(userId, include_processed || false);
+
+    if (items.length === 0) {
+      return jsonRpcSuccess(requestId, {
+        content: [
+          {
+            type: 'text',
+            text: 'Your inbox is empty! Use add_to_inbox to capture new tasks.',
+          },
+        ],
+      });
+    }
+
+    const itemList = items.map((item, index) => {
+      const createdDate = new Date(item.created_at);
+      const dateStr = createdDate.toLocaleDateString('en-US', {
+        timeZone: 'America/New_York',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+      let line = `${index + 1}. ${item.title}`;
+      if (item.notes) line += `\n   Notes: ${item.notes}`;
+      line += `\n   Added: ${dateStr}`;
+      if (item.processed) line += ' [PROCESSED]';
+      line += `\n   ID: ${item.sk}`;
+      return line;
+    }).join('\n\n');
+
+    const summary = `Inbox (${items.length} item${items.length !== 1 ? 's' : ''}):\n\n${itemList}`;
+
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: summary,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error('listInbox error:', error);
+    return jsonRpcError(requestId, -32603, `Failed to list inbox: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function getNextInboxItemHandler(
+  requestId: string | number,
+  userPk: string
+): Promise<APIGatewayProxyResultV2> {
+  const userId = userPk.replace('USER#', '');
+
+  try {
+    const item = await getNextInboxItem(userId);
+
+    if (!item) {
+      return jsonRpcSuccess(requestId, {
+        content: [
+          {
+            type: 'text',
+            text: 'Your inbox is empty! All items have been processed.',
+          },
+        ],
+      });
+    }
+
+    const createdDate = new Date(item.created_at);
+    const dateStr = createdDate.toLocaleDateString('en-US', {
+      timeZone: 'America/New_York',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+
+    let text = `Next inbox item:\n\nTitle: ${item.title}`;
+    if (item.notes) text += `\nNotes: ${item.notes}`;
+    text += `\nAdded: ${dateStr}`;
+    text += `\nID: ${item.sk}`;
+    text += `\n\nProvide task details (duration, priority, category, due date) to create in Reclaim, then use mark_inbox_processed with this ID.`;
+
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error('getNextInboxItem error:', error);
+    return jsonRpcError(requestId, -32603, `Failed to get next inbox item: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function markInboxProcessedHandler(
+  requestId: string | number,
+  args: Record<string, unknown>,
+  userPk: string
+): Promise<APIGatewayProxyResultV2> {
+  const { item_id } = args as {
+    item_id?: string;
+  };
+
+  if (!item_id || typeof item_id !== 'string') {
+    return jsonRpcError(requestId, -32602, 'Invalid params: item_id is required');
+  }
+
+  const userId = userPk.replace('USER#', '');
+
+  try {
+    await markInboxItemProcessed(userId, item_id);
+    console.log(`Inbox item marked processed: ${item_id}`);
+
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: `Inbox item marked as processed.\n\nUse get_next_inbox_item to continue processing your inbox.`,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error('markInboxProcessed error:', error);
+    return jsonRpcError(requestId, -32603, `Failed to mark item processed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

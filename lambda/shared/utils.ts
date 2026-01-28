@@ -10,7 +10,7 @@ const secretsClient = new SecretsManagerClient({});
 
 // Cache for secrets
 const secretsCache: Record<string, { value: string; expiry: number }> = {};
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 60 * 1000; // 1 minute
 
 export async function getSecret(secretName: string): Promise<string> {
   const now = Date.now();

@@ -38,6 +38,10 @@ const TOOLS = [
           type: 'string',
           description: 'Due date in ISO 8601 format (optional)',
         },
+        schedule_after: {
+          type: 'string',
+          description: 'Don\'t schedule this task before this date/time - ISO 8601 format (optional)',
+        },
       },
       required: ['title', 'duration_minutes', 'priority', 'category'],
     },
@@ -168,13 +172,14 @@ async function createReclaimTask(
   args: Record<string, unknown>
 ): Promise<APIGatewayProxyResultV2> {
   // Validate required fields
-  const { title, duration_minutes, priority, category, notes, due } = args as {
+  const { title, duration_minutes, priority, category, notes, due, schedule_after } = args as {
     title?: string;
     duration_minutes?: number;
     priority?: string;
     category?: string;
     notes?: string;
     due?: string;
+    schedule_after?: string;
   };
 
   if (!title || typeof title !== 'string') {
@@ -224,6 +229,10 @@ async function createReclaimTask(
 
   if (due) {
     reclaimRequest.due = due;
+  }
+
+  if (schedule_after) {
+    reclaimRequest.snoozeUntil = schedule_after;
   }
 
   // Get Reclaim API key and call API

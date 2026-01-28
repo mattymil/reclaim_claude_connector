@@ -31,6 +31,15 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    // GTD Inbox table for quick task capture
+    const inboxTable = new dynamodb.Table(this, 'InboxTable', {
+      tableName: 'reclaim-connector-inbox',
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     // Secrets Manager - placeholder secrets (values to be set manually)
     const reclaimApiKeySecret = new secretsmanager.Secret(this, 'ReclaimApiKeySecret', {
       secretName: 'reclaim-api-key',
@@ -107,6 +116,7 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       environment: {
         RECLAIM_SECRET_NAME: reclaimApiKeySecret.secretName,
         TOKENS_TABLE_NAME: tokensTable.tableName,
+        INBOX_TABLE_NAME: inboxTable.tableName,
       },
     });
 
@@ -120,6 +130,7 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
     reclaimApiKeySecret.grantRead(taskLambda);
     reclaimApiKeySecret.grantRead(mcpLambda);
     tokensTable.grantReadData(mcpLambda);
+    inboxTable.grantReadWriteData(mcpLambda);
     oauthConfigSecret.grantRead(authorizeLambda);
     oauthConfigSecret.grantRead(tokenLambda);
 

@@ -345,7 +345,8 @@ export async function getInboxItems(
     new QueryCommand({
       TableName: tableName,
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
-      FilterExpression: includeProcessed ? undefined : 'processed = :processed',
+      FilterExpression: includeProcessed ? undefined : '#processed = :processed',
+      ExpressionAttributeNames: includeProcessed ? undefined : { '#processed': 'processed' },
       ExpressionAttributeValues: {
         ':pk': `USER#${userId}`,
         ':prefix': 'INBOX#',
@@ -374,7 +375,8 @@ export async function markInboxItemProcessed(
     new UpdateCommand({
       TableName: tableName,
       Key: { pk: `USER#${userId}`, sk },
-      UpdateExpression: 'SET processed = :processed',
+      UpdateExpression: 'SET #processed = :processed',
+      ExpressionAttributeNames: { '#processed': 'processed' },
       ExpressionAttributeValues: {
         ':processed': true,
       },

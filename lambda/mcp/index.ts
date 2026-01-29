@@ -285,6 +285,49 @@ const PRIORITY_MAP: Record<string, string> = {
   'LOW': 'P4',
 };
 
+// Get Eastern Time offset for a given date (handles DST)
+function getEasternOffset(date: Date): string {
+  // Format a date in Eastern time and extract the offset
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  });
+  const parts = formatter.formatToParts(date);
+  const offsetPart = parts.find(p => p.type === 'timeZoneName');
+  // Returns something like "GMT-5" or "GMT-4"
+  if (offsetPart) {
+    const match = offsetPart.value.match(/GMT([+-]\d+)/);
+    if (match) {
+      const hours = parseInt(match[1], 10);
+      const sign = hours >= 0 ? '+' : '-';
+      return `${sign}${String(Math.abs(hours)).padStart(2, '0')}:00`;
+    }
+  }
+  // Fallback to EST
+  return '-05:00';
+}
+
+// Convert date to full ISO 8601 datetime with timezone for Reclaim API
+function toReclaimDateTime(dateStr: string, endOfDay: boolean = true): string {
+  // If already has time component with timezone, return as-is
+  if (dateStr.includes('T') && (dateStr.includes('Z') || dateStr.includes('+') || dateStr.includes('-', 10))) {
+    return dateStr;
+  }
+
+  // Parse the date to determine correct Eastern offset (EST vs EDT)
+  const targetDate = new Date(dateStr);
+  const offset = getEasternOffset(targetDate);
+
+  // If has time but no timezone, add Eastern timezone
+  if (dateStr.includes('T')) {
+    return `${dateStr}${offset}`;
+  }
+
+  // Date only (YYYY-MM-DD) - convert to end of day or start of day in Eastern
+  const time = endOfDay ? 'T23:59:59' : 'T00:00:00';
+  return `${dateStr}${time}${offset}`;
+}
+
 const PRIORITY_REVERSE_MAP: Record<string, string> = {
   'P1': 'CRITICAL',
   'P2': 'HIGH',
@@ -454,8 +497,8 @@ async function createReclaimTask(
   };
 
   if (notes) reclaimRequest.notes = notes;
-  if (due) reclaimRequest.due = due;
-  if (schedule_after) reclaimRequest.snoozeUntil = schedule_after;
+  if (due) reclaimRequest.due = toReclaimDateTime(due, true);
+  if (schedule_after) reclaimRequest.snoozeUntil = toReclaimDateTime(schedule_after, false);
 
   const reclaimApiKey = await getSecret(process.env.RECLAIM_SECRET_NAME!);
 
@@ -568,8 +611,8 @@ async function updateReclaimTask(
 
   if (title) updateRequest.title = title.trim();
   if (notes !== undefined) updateRequest.notes = notes;
-  if (due) updateRequest.due = due;
-  if (schedule_after) updateRequest.snoozeUntil = schedule_after;
+  if (due) updateRequest.due = toReclaimDateTime(due, true);
+  if (schedule_after) updateRequest.snoozeUntil = toReclaimDateTime(schedule_after, false);
 
   if (duration_minutes !== undefined) {
     if (duration_minutes % 15 !== 0) {

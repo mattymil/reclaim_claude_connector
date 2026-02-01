@@ -41,8 +41,8 @@ Claude Desktop/API → MCP Protocol → API Gateway → Lambda → Reclaim.ai AP
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/mattymil/reclaim-claude-connector.git
-cd reclaim-claude-connector
+git clone https://github.com/mattymil/reclaim_claude_connector.git
+cd reclaim_claude_connector
 npm install
 ```
 

@@ -6,3 +6,10 @@ node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# IDE
+.idea/
+
+# Internal specs
+spec.md
+otter-spec.md

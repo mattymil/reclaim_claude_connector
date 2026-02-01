@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS-based connector that enables Claude to create tasks in Reclaim.ai via OAuth 2.0 authenticated API endpoints. Designed as an MCP (Model Context Protocol) integration.
 
-**Status:** Fully implemented and deployed.
-
 ## Architecture
 
 ```
@@ -20,10 +18,13 @@ Claude MCP → OAuth 2.0 Flow → API Gateway → Lambda Functions → Reclaim.a
 - **Lambda Functions** (Node.js 20.x):
   - `reclaim-connector-oauth-authorize` - Initiates OAuth flow with PKCE
   - `reclaim-connector-oauth-token` - Token exchange and refresh
-  - `reclaim-connector-task` - Creates tasks in Reclaim.ai
+  - `reclaim-connector-mcp` - MCP JSON-RPC handler for all tools
+  - `reclaim-connector-task` - Legacy REST endpoint for task creation
 - **DynamoDB Tables**:
   - `reclaim-connector-oauth-tokens` - Stores hashed tokens (pk/sk keys, TTL on `expires_at`)
   - `reclaim-connector-oauth-state` - OAuth state and PKCE challenges (TTL cleanup)
+  - `reclaim-connector-inbox` - GTD inbox items
+  - `reclaim-connector-otter-processed` - Processed Otter meeting tracking
 - **Secrets Manager** - Reclaim API key and OAuth client config
 
 ## Key Implementation Details
@@ -44,16 +45,14 @@ priority: CRITICAL→P1, HIGH→P2, MEDIUM→P3, LOW→P4
 
 `duration_minutes` must be divisible by 15.
 
-### Live Endpoint
-
-**API Base:** `https://r6y21n5qee.execute-api.us-east-1.amazonaws.com`
-
-### Environment Variables
+### Environment Variables (set by CDK)
 
 - `RECLAIM_SECRET_NAME` - Secrets Manager secret for Reclaim API key
 - `OAUTH_SECRET_NAME` - Secrets Manager secret for OAuth config
 - `TOKENS_TABLE_NAME` - DynamoDB tokens table name
 - `STATE_TABLE_NAME` - DynamoDB state table name
+- `INBOX_TABLE_NAME` - DynamoDB inbox table name
+- `OTTER_PROCESSED_TABLE_NAME` - DynamoDB Otter processed table name
 
 ## Build & Deploy Commands
 
@@ -62,10 +61,10 @@ npm install          # Install dependencies
 npm run build        # Compile TypeScript
 npm run test         # Run tests
 
-# CDK commands (use ASON profile)
-cdk synth --profile ASON    # Generate CloudFormation template
-cdk diff --profile ASON     # Preview changes
-cdk deploy --profile ASON   # Deploy to AWS
+# CDK commands
+cdk synth            # Generate CloudFormation template
+cdk diff             # Preview changes
+cdk deploy           # Deploy to AWS
 ```
 
 ## API Endpoints
@@ -75,8 +74,6 @@ cdk deploy --profile ASON   # Deploy to AWS
 | `/oauth/authorize` | GET | Authorization Lambda |
 | `/oauth/token` | POST | Token Lambda |
 | `/oauth/revoke` | POST | Token Lambda |
-| `/mcp/reclaim/task` | POST | Task Lambda |
+| `/mcp` | POST | MCP Lambda (JSON-RPC) |
+| `/mcp/reclaim/task` | POST | Task Lambda (legacy) |
 
-## Reference
-
-Full specification including OAuth config, DynamoDB schemas, IAM permissions, and testing commands is in `spec.md`.

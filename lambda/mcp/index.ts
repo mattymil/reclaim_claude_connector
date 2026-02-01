@@ -7,6 +7,9 @@ import {
   getNextInboxItem,
   markInboxItemProcessed,
   InboxItem,
+  getProcessedOtterMeetings,
+  markOtterMeetingProcessed,
+  ProcessedMeeting,
 } from '../shared/utils';
 
 // MCP Tool Definitions
@@ -247,6 +250,38 @@ const TOOLS = [
       required: ['item_id'],
     },
   },
+  // Otter processed meetings tracking tools
+  {
+    name: 'get_processed_otter_meetings',
+    description: 'Get a list of Otter meetings that have already had their action items exported to Reclaim. Use this to avoid duplicate exports.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'mark_otter_meeting_processed',
+    description: 'Mark an Otter meeting as processed after exporting its action items to Reclaim. This prevents duplicate exports in future sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        otter_meeting_id: {
+          type: 'string',
+          description: 'The unique ID of the Otter meeting',
+        },
+        meeting_title: {
+          type: 'string',
+          description: 'The title of the meeting (optional, for reference)',
+        },
+        action_items_count: {
+          type: 'integer',
+          description: 'Number of action items exported (optional, for reference)',
+        },
+      },
+      required: ['otter_meeting_id'],
+    },
+  },
 ];
 
 // Server info
@@ -438,6 +473,10 @@ async function handleToolsCall(request: JsonRpcRequest, userPk: string): Promise
       return getNextInboxItemHandler(request.id, userPk);
     case 'mark_inbox_processed':
       return markInboxProcessedHandler(request.id, params.arguments || {}, userPk);
+    case 'get_processed_otter_meetings':
+      return getProcessedOtterMeetingsHandler(request.id, userPk);
+    case 'mark_otter_meeting_processed':
+      return markOtterMeetingProcessedHandler(request.id, params.arguments || {}, userPk);
     default:
       return jsonRpcError(request.id, -32602, `Unknown tool: ${params.name}`);
   }
@@ -1223,6 +1262,100 @@ async function markInboxProcessedHandler(
   } catch (error) {
     console.error('markInboxProcessed error:', error);
     return jsonRpcError(requestId, -32603, `Failed to mark item processed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+// Otter processed meetings handlers
+async function getProcessedOtterMeetingsHandler(
+  requestId: string | number,
+  userPk: string
+): Promise<APIGatewayProxyResultV2> {
+  const userId = userPk.replace('USER#', '');
+
+  try {
+    const meetings = await getProcessedOtterMeetings(userId);
+
+    if (meetings.length === 0) {
+      return jsonRpcSuccess(requestId, {
+        content: [
+          {
+            type: 'text',
+            text: 'No Otter meetings have been processed yet.',
+          },
+        ],
+      });
+    }
+
+    const meetingList = meetings.map((m, index) => {
+      const processedDate = new Date(m.processed_at);
+      const dateStr = processedDate.toLocaleDateString('en-US', {
+        timeZone: 'America/New_York',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      let line = `${index + 1}. ${m.meeting_title || '(No title)'}`;
+      line += `\n   Meeting ID: ${m.otter_meeting_id}`;
+      if (m.action_items_count !== null) {
+        line += `\n   Action items exported: ${m.action_items_count}`;
+      }
+      line += `\n   Processed: ${dateStr}`;
+      return line;
+    }).join('\n\n');
+
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: `Processed Otter meetings (${meetings.length}):\n\n${meetingList}`,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error('getProcessedOtterMeetings error:', error);
+    return jsonRpcError(requestId, -32603, `Failed to get processed meetings: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function markOtterMeetingProcessedHandler(
+  requestId: string | number,
+  args: Record<string, unknown>,
+  userPk: string
+): Promise<APIGatewayProxyResultV2> {
+  const { otter_meeting_id, meeting_title, action_items_count } = args as {
+    otter_meeting_id?: string;
+    meeting_title?: string;
+    action_items_count?: number;
+  };
+
+  if (!otter_meeting_id || typeof otter_meeting_id !== 'string') {
+    return jsonRpcError(requestId, -32602, 'Invalid params: otter_meeting_id is required');
+  }
+
+  const userId = userPk.replace('USER#', '');
+
+  try {
+    const { processed_at } = await markOtterMeetingProcessed(
+      userId,
+      otter_meeting_id,
+      meeting_title,
+      action_items_count
+    );
+    console.log(`Otter meeting marked processed: ${otter_meeting_id}`);
+
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: `Otter meeting marked as processed.\n\nMeeting ID: ${otter_meeting_id}${meeting_title ? `\nTitle: ${meeting_title}` : ''}${action_items_count !== undefined ? `\nAction items: ${action_items_count}` : ''}\nProcessed at: ${processed_at}`,
+        },
+      ],
+    });
+  } catch (error) {
+    console.error('markOtterMeetingProcessed error:', error);
+    return jsonRpcError(requestId, -32603, `Failed to mark meeting processed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

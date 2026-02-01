@@ -384,6 +384,61 @@ export async function markInboxItemProcessed(
   );
 }
 
+// Otter processed meetings helpers
+export interface ProcessedMeeting {
+  pk: string;
+  sk: string;
+  otter_meeting_id: string;
+  meeting_title: string | null;
+  action_items_count: number | null;
+  processed_at: string;
+}
+
+export async function getProcessedOtterMeetings(userId: string): Promise<ProcessedMeeting[]> {
+  const tableName = process.env.OTTER_PROCESSED_TABLE_NAME!;
+  const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
+
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':prefix': 'MEETING#',
+      },
+      ScanIndexForward: false, // Most recent first
+    })
+  );
+
+  return (result.Items || []) as ProcessedMeeting[];
+}
+
+export async function markOtterMeetingProcessed(
+  userId: string,
+  otterMeetingId: string,
+  meetingTitle?: string,
+  actionItemsCount?: number
+): Promise<{ processed_at: string }> {
+  const tableName = process.env.OTTER_PROCESSED_TABLE_NAME!;
+  const processedAt = new Date().toISOString();
+
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        pk: `USER#${userId}`,
+        sk: `MEETING#${otterMeetingId}`,
+        otter_meeting_id: otterMeetingId,
+        meeting_title: meetingTitle || null,
+        action_items_count: actionItemsCount ?? null,
+        processed_at: processedAt,
+      },
+    })
+  );
+
+  return { processed_at: processedAt };
+}
+
 // Response helpers
 export function jsonResponse(statusCode: number, body: object): {
   statusCode: number;

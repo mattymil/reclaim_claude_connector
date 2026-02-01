@@ -40,6 +40,15 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    // Otter processed meetings tracking table
+    const otterProcessedTable = new dynamodb.Table(this, 'OtterProcessedTable', {
+      tableName: 'reclaim-connector-otter-processed',
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     // Secrets Manager - placeholder secrets (values to be set manually)
     const reclaimApiKeySecret = new secretsmanager.Secret(this, 'ReclaimApiKeySecret', {
       secretName: 'reclaim-api-key',
@@ -117,6 +126,7 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
         RECLAIM_SECRET_NAME: reclaimApiKeySecret.secretName,
         TOKENS_TABLE_NAME: tokensTable.tableName,
         INBOX_TABLE_NAME: inboxTable.tableName,
+        OTTER_PROCESSED_TABLE_NAME: otterProcessedTable.tableName,
       },
     });
 
@@ -131,6 +141,7 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
     reclaimApiKeySecret.grantRead(mcpLambda);
     tokensTable.grantReadData(mcpLambda);
     inboxTable.grantReadWriteData(mcpLambda);
+    otterProcessedTable.grantReadWriteData(mcpLambda);
     oauthConfigSecret.grantRead(authorizeLambda);
     oauthConfigSecret.grantRead(tokenLambda);
 

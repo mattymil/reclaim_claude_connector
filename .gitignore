@@ -7,6 +7,9 @@ node_modules
 .cdk.staging
 cdk.out
 
+# Local CDK context (user-specific config)
+cdk.context.json
+
 # IDE
 .idea/
 

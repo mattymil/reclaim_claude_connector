@@ -274,39 +274,55 @@ curl -X POST https://<your-endpoint>/inbox \
 
 ---
 
+## Configuration
+
+Copy the example config file and customize for your deployment:
+
+```bash
+cp cdk.context.example.json cdk.context.json
+```
+
+Edit `cdk.context.json` with your settings:
+
+```json
+{
+  "emailDomain": "yourdomain.com",
+  "emailSubdomain": "inbox",
+  "emailLocalPart": "todo",
+  "hostedZoneId": "ZXXXXXXXXXXXXXXXXXX",
+  "inboxUserId": "my-user-id"
+}
+```
+
+This file is gitignored to keep your personal config local.
+
+### Configuration Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `emailDomain` | (none) | Your domain for email inbox (e.g., `example.com`) |
+| `hostedZoneId` | (none) | Route53 hosted zone ID for your domain |
+| `emailSubdomain` | `inbox` | Subdomain for email receiving |
+| `emailLocalPart` | `todo` | Local part of email address |
+| `inboxUserId` | `default-user` | User ID for grouping inbox items |
+
+---
+
 ## Email Inbox (Optional)
 
 Send or forward emails to add items to your inbox. The email subject becomes the title, and the body becomes the notes.
 
 ### Setup
 
-Email inbox requires additional configuration:
-
-```bash
-cdk deploy \
-  -c emailDomain=yourdomain.com \
-  -c hostedZoneId=ZXXXXXXXXXX \
-  -c emailSubdomain=inbox \
-  -c emailLocalPart=todo
-```
-
-This creates the address `todo@inbox.yourdomain.com`.
+1. Configure `emailDomain` and `hostedZoneId` in `cdk.context.json`
+2. Deploy: `cdk deploy`
+3. The email address will be output (e.g., `todo@inbox.yourdomain.com`)
 
 ### Requirements
 
 1. **Domain in Route53** - Your domain must be hosted in Route53
 2. **SES Domain Verification** - Verify your domain in SES
 3. **SES Rule Set Activation** - Activate the created rule set in SES console
-
-### Configuration Options
-
-| Context Variable | Default | Description |
-|------------------|---------|-------------|
-| `emailDomain` | (none) | Your domain (e.g., `example.com`) |
-| `hostedZoneId` | (none) | Route53 hosted zone ID |
-| `emailSubdomain` | `inbox` | Subdomain for email |
-| `emailLocalPart` | `todo` | Local part of email address |
-| `inboxUserId` | `default-user` | User ID for inbox items |
 
 ---
 

@@ -1,0 +1,7 @@
+{
+  "emailDomain": "example.com",
+  "emailSubdomain": "inbox",
+  "emailLocalPart": "todo",
+  "hostedZoneId": "ZXXXXXXXXXXXXXXXXXX",
+  "inboxUserId": "my-user-id"
+}

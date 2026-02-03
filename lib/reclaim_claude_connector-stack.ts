@@ -5,12 +5,26 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as ses from 'aws-cdk-lib/aws-ses';
+import * as sesActions from 'aws-cdk-lib/aws-ses-actions';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as path from 'path';
+
+// Configuration constants - customize for your deployment
+const DEFAULT_INBOX_USER_ID = 'default-user';
 
 export class ReclaimClaudeConnectorStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // Configuration via CDK context (cdk deploy -c emailDomain=example.com)
+    const emailDomain = this.node.tryGetContext('emailDomain') as string | undefined;
+    const emailSubdomain = this.node.tryGetContext('emailSubdomain') || 'inbox';
+    const emailLocalPart = this.node.tryGetContext('emailLocalPart') || 'todo';
+    const inboxUserId = this.node.tryGetContext('inboxUserId') || DEFAULT_INBOX_USER_ID;
 
     // DynamoDB Tables
     const tokensTable = new dynamodb.Table(this, 'OAuthTokensTable', {
@@ -74,6 +88,16 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       },
     });
 
+    // API key for public inbox endpoint (iOS shortcuts, etc.)
+    const publicInboxApiKeySecret = new secretsmanager.Secret(this, 'PublicInboxApiKeySecret', {
+      secretName: 'reclaim-connector-public-inbox-api-key',
+      description: 'API key for public inbox endpoint (iOS shortcuts, etc.)',
+      generateSecretString: {
+        excludePunctuation: true,
+        passwordLength: 32,
+      },
+    });
+
     // Lambda Functions
     const authorizeLambda = new NodejsFunction(this, 'AuthorizeLambda', {
       functionName: 'reclaim-connector-oauth-authorize',
@@ -130,6 +154,105 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       },
     });
 
+    // Public inbox Lambda for iOS shortcuts and external API calls
+    const publicInboxLambda = new NodejsFunction(this, 'PublicInboxLambda', {
+      functionName: 'reclaim-connector-public-inbox',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, '../lambda/public-inbox/index.ts'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(10),
+      environment: {
+        INBOX_TABLE_NAME: inboxTable.tableName,
+        API_KEY_SECRET_NAME: publicInboxApiKeySecret.secretName,
+        INBOX_USER_ID: inboxUserId,
+      },
+    });
+
+    // =====================
+    // Email-to-Inbox Setup (Optional - requires emailDomain context)
+    // =====================
+
+    // S3 bucket for storing incoming emails (auto-generated name for uniqueness)
+    const emailBucket = new s3.Bucket(this, 'EmailBucket', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      lifecycleRules: [
+        {
+          expiration: cdk.Duration.days(7), // Auto-delete after 7 days
+        },
+      ],
+    });
+
+    // Email ingest Lambda
+    const emailIngestLambda = new NodejsFunction(this, 'EmailIngestLambda', {
+      functionName: 'reclaim-connector-email-ingest',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: path.join(__dirname, '../lambda/email-ingest/index.ts'),
+      handler: 'handler',
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        INBOX_TABLE_NAME: inboxTable.tableName,
+        EMAIL_USER_ID: inboxUserId,
+      },
+    });
+
+    // Grant Lambda permissions
+    emailBucket.grantRead(emailIngestLambda);
+    inboxTable.grantWriteData(emailIngestLambda);
+
+    // Trigger Lambda when email arrives in S3
+    emailBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.LambdaDestination(emailIngestLambda),
+      { prefix: 'incoming/' }
+    );
+
+    // Full email address for SES rule
+    const fullEmailAddress = emailDomain
+      ? `${emailLocalPart}@${emailSubdomain}.${emailDomain}`
+      : undefined;
+
+    // Route53 Hosted Zone - provide via context: cdk deploy -c hostedZoneId=ZXXXXX -c emailDomain=example.com
+    const hostedZoneId = this.node.tryGetContext('hostedZoneId') as string | undefined;
+    if (hostedZoneId && emailDomain) {
+      const hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
+        hostedZoneId,
+        zoneName: emailDomain,
+      });
+
+      // Create MX record for subdomain pointing to SES
+      new route53.MxRecord(this, 'InboxMxRecord', {
+        zone: hostedZone,
+        recordName: emailSubdomain,
+        values: [
+          {
+            priority: 10,
+            hostName: 'inbound-smtp.us-east-1.amazonaws.com',
+          },
+        ],
+      });
+    }
+
+    // SES Receipt Rule Set
+    const ruleSet = new ses.ReceiptRuleSet(this, 'EmailRuleSet', {
+      receiptRuleSetName: 'reclaim-inbox-rules',
+    });
+
+    // SES Receipt Rule (only if email domain is configured)
+    if (fullEmailAddress) {
+      ruleSet.addRule('TodoEmailRule', {
+        recipients: [fullEmailAddress],
+        actions: [
+          new sesActions.S3({
+            bucket: emailBucket,
+            objectKeyPrefix: 'incoming/',
+          }),
+        ],
+      });
+    }
+
     // Grant permissions
     tokensTable.grantReadWriteData(tokenLambda);
     tokensTable.grantReadWriteData(authorizeLambda);
@@ -144,6 +267,10 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
     otterProcessedTable.grantReadWriteData(mcpLambda);
     oauthConfigSecret.grantRead(authorizeLambda);
     oauthConfigSecret.grantRead(tokenLambda);
+
+    // Public inbox Lambda permissions
+    inboxTable.grantWriteData(publicInboxLambda);
+    publicInboxApiKeySecret.grantRead(publicInboxLambda);
 
     // API Gateway HTTP API
     const httpApi = new apigatewayv2.HttpApi(this, 'ReclaimMcpApi', {
@@ -200,6 +327,13 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       integration: new apigatewayv2_integrations.HttpLambdaIntegration('McpIntegration', mcpLambda),
     });
 
+    // Public inbox endpoint for iOS shortcuts and external API calls
+    httpApi.addRoutes({
+      path: '/inbox',
+      methods: [apigatewayv2.HttpMethod.POST],
+      integration: new apigatewayv2_integrations.HttpLambdaIntegration('PublicInboxIntegration', publicInboxLambda),
+    });
+
     // Outputs
     new cdk.CfnOutput(this, 'ApiEndpoint', {
       value: httpApi.apiEndpoint,
@@ -224,6 +358,19 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'McpServerUrl', {
       value: `${httpApi.apiEndpoint}/mcp`,
       description: 'MCP server URL for Claude connector',
+    });
+
+    // Only output email address if domain is configured
+    if (fullEmailAddress) {
+      new cdk.CfnOutput(this, 'InboxEmailAddress', {
+        value: fullEmailAddress,
+        description: 'Email address to send todos to your inbox',
+      });
+    }
+
+    new cdk.CfnOutput(this, 'PublicInboxUrl', {
+      value: `${httpApi.apiEndpoint}/inbox`,
+      description: 'Public inbox endpoint for iOS shortcuts',
     });
   }
 }

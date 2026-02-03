@@ -10,12 +10,21 @@ This connector allows Claude to:
 - **Quick-capture ideas** to a GTD-style inbox for later processing
 - **Track Otter.ai meeting exports** to prevent duplicate action item imports
 
+### Additional Inbox Capture Methods
+
+Beyond the MCP tools, you can add items to your inbox via:
+- **Public API** - REST endpoint for iOS Shortcuts, Zapier, etc.
+- **Email** - Forward or send emails to a dedicated inbox address (optional setup)
+
 ## Architecture
 
 ```
-Claude Desktop/API → MCP Protocol → API Gateway → Lambda → Reclaim.ai API
-                          ↓
-                    OAuth 2.0 + PKCE
+Claude Desktop/API --> MCP Protocol --> API Gateway --> Lambda --> Reclaim.ai API
+                            |
+                      OAuth 2.0 + PKCE
+
+iOS Shortcuts/Zapier --> /inbox API --> Lambda --> DynamoDB Inbox
+Email --> SES --> S3 --> Lambda --> DynamoDB Inbox
 ```
 
 ### AWS Components
@@ -23,9 +32,11 @@ Claude Desktop/API → MCP Protocol → API Gateway → Lambda → Reclaim.ai AP
 | Component | Purpose |
 |-----------|---------|
 | **API Gateway** | HTTP API with CORS for Claude origins |
-| **Lambda Functions** | Node.js 20.x handlers for OAuth and MCP |
+| **Lambda Functions** | Node.js 20.x handlers for OAuth, MCP, and inbox |
 | **DynamoDB** | OAuth tokens, inbox items, processed meetings |
 | **Secrets Manager** | API keys and OAuth client config |
+| **SES** | Email receiving (optional) |
+| **S3** | Email storage (optional) |
 
 ---
 
@@ -49,7 +60,7 @@ npm install
 ### 2. Get Your Reclaim.ai API Key
 
 1. Log into [Reclaim.ai](https://app.reclaim.ai)
-2. Go to **Settings → Integrations → API**
+2. Go to **Settings > Integrations > API**
 3. Generate a new API key
 
 ### 3. Deploy
@@ -111,13 +122,13 @@ Create a task that Reclaim will automatically schedule.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `title` | string | Yes | — | Task title |
+| `title` | string | Yes | - | Task title |
 | `duration_minutes` | integer | No | 30 | Time needed (must be divisible by 15) |
 | `priority` | string | No | LOW | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` |
 | `category` | string | No | WORK | `WORK` or `PERSONAL` |
-| `notes` | string | No | — | Task description |
-| `due` | string | No | — | Due date (ISO 8601) |
-| `schedule_after` | string | No | — | Don't schedule before this time (ISO 8601) |
+| `notes` | string | No | - | Task description |
+| `due` | string | No | - | Due date (ISO 8601) |
+| `schedule_after` | string | No | - | Don't schedule before this time (ISO 8601) |
 
 #### `update_reclaim_task`
 
@@ -142,7 +153,7 @@ List tasks with optional date filtering.
 |-----------|------|----------|---------|-------------|
 | `start_date` | string | No | today | Start of range (ISO 8601) |
 | `end_date` | string | No | +7 days | End of range (ISO 8601) |
-| `status` | string | No | — | Filter by status |
+| `status` | string | No | - | Filter by status |
 
 #### `search_reclaim_tasks`
 
@@ -199,15 +210,115 @@ Track which meetings have had action items exported to prevent duplicates.
 
 ---
 
+## Public Inbox API
+
+Add items to your inbox from external sources like iOS Shortcuts, Zapier, or any HTTP client.
+
+### Endpoint
+
+```
+POST /inbox
+```
+
+### Authentication
+
+Include your API key in the `X-API-Key` header. Get the key from AWS Secrets Manager after deployment:
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id reclaim-connector-public-inbox-api-key \
+  --query SecretString --output text
+```
+
+### Request
+
+```json
+{
+  "title": "Buy groceries",
+  "notes": "Milk, eggs, bread"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Item title |
+| `notes` | string | No | Additional notes |
+
+### Response
+
+```json
+{
+  "success": true,
+  "id": "INBOX#1234567890"
+}
+```
+
+### Example: curl
+
+```bash
+curl -X POST https://<your-endpoint>/inbox \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{"title": "Call dentist", "notes": "Schedule cleaning"}'
+```
+
+### Example: iOS Shortcut
+
+1. Create a new Shortcut
+2. Add "Get Contents of URL" action
+3. Set Method to POST
+4. Add Headers:
+   - `Content-Type`: `application/json`
+   - `X-API-Key`: Your API key
+5. Set Request Body to JSON with `title` and optionally `notes`
+
+---
+
+## Email Inbox (Optional)
+
+Send or forward emails to add items to your inbox. The email subject becomes the title, and the body becomes the notes.
+
+### Setup
+
+Email inbox requires additional configuration:
+
+```bash
+cdk deploy \
+  -c emailDomain=yourdomain.com \
+  -c hostedZoneId=ZXXXXXXXXXX \
+  -c emailSubdomain=inbox \
+  -c emailLocalPart=todo
+```
+
+This creates the address `todo@inbox.yourdomain.com`.
+
+### Requirements
+
+1. **Domain in Route53** - Your domain must be hosted in Route53
+2. **SES Domain Verification** - Verify your domain in SES
+3. **SES Rule Set Activation** - Activate the created rule set in SES console
+
+### Configuration Options
+
+| Context Variable | Default | Description |
+|------------------|---------|-------------|
+| `emailDomain` | (none) | Your domain (e.g., `example.com`) |
+| `hostedZoneId` | (none) | Route53 hosted zone ID |
+| `emailSubdomain` | `inbox` | Subdomain for email |
+| `emailLocalPart` | `todo` | Local part of email address |
+| `inboxUserId` | `default-user` | User ID for inbox items |
+
+---
+
 ## API Parameter Notes
 
 **Duration:** Must be divisible by 15 (Reclaim uses 15-minute blocks).
 
 **Priority mapping:**
-- `CRITICAL` → P1
-- `HIGH` → P2
-- `MEDIUM` → P3
-- `LOW` → P4
+- `CRITICAL` -> P1
+- `HIGH` -> P2
+- `MEDIUM` -> P3
+- `LOW` -> P4
 
 **Dates:** Use ISO 8601 format (e.g., `2024-01-15` or `2024-01-15T09:00:00-05:00`).
 
@@ -240,6 +351,7 @@ cdk destroy          # Tear down stack
 - **Short-lived access tokens** (1 hour default)
 - **Automatic cleanup** via DynamoDB TTL
 - **Strict redirect URI validation**
+- **API key authentication** for public inbox endpoint
 
 ---
 
@@ -256,6 +368,16 @@ Check CloudWatch logs for the Lambda function. Common issues:
 - Invalid API key
 - Malformed date formats
 - Missing required fields
+
+### Public inbox returns 401
+- Verify your API key is correct
+- Check the `X-API-Key` header is being sent
+- Retrieve the current key from Secrets Manager
+
+### Emails not creating inbox items
+- Verify SES rule set is active (SES Console > Email Receiving > Rule Sets)
+- Check CloudWatch logs for the email-ingest Lambda
+- Ensure domain is verified in SES
 
 ---
 

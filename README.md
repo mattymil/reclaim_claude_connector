@@ -369,6 +369,11 @@ cdk destroy          # Tear down stack
 - **Strict redirect URI validation**
 - **API key authentication** for public inbox endpoint
 
+## Data Protection
+
+- **Point-in-Time Recovery** enabled on all DynamoDB tables (35-day continuous backups)
+- **Retain on delete** - tables are preserved if the stack is destroyed
+
 ---
 
 ## Troubleshooting

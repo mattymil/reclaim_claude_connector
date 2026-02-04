@@ -84,9 +84,8 @@ async function handleAuthorizationCode(params: Record<string, string>): Promise<
   const accessToken = generateToken();
   const refreshToken = generateToken();
 
-  // Generate a user ID (in a real system, this would come from user authentication)
-  // For this connector, we use a hash of the code to create a consistent user ID
-  const userId = `claude-${Date.now()}`;
+  // Use configured user ID (single-user system for inbox processing)
+  const userId = process.env.USER_ID!;
 
   // Save tokens
   const scopes = authCodeData.scope.split(' ');

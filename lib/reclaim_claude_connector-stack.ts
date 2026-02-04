@@ -34,7 +34,8 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       // TTL disabled via CLI - will be re-enabled on refresh_expires_at after cooldown period
       // timeToLiveAttribute: 'refresh_expires_at',
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     const stateTable = new dynamodb.Table(this, 'OAuthStateTable', {
@@ -42,7 +43,8 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       partitionKey: { name: 'state', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: 'expires_at',
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // GTD Inbox table for quick task capture
@@ -51,7 +53,8 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // Otter processed meetings tracking table
@@ -60,7 +63,8 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // Secrets Manager - placeholder secrets (values to be set manually)
@@ -123,6 +127,7 @@ export class ReclaimClaudeConnectorStack extends cdk.Stack {
         OAUTH_SECRET_NAME: oauthConfigSecret.secretName,
         TOKENS_TABLE_NAME: tokensTable.tableName,
         STATE_TABLE_NAME: stateTable.tableName,
+        USER_ID: inboxUserId,
       },
     });
 

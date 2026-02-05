@@ -30,7 +30,7 @@ const TOOLS = [
         },
         priority: {
           type: 'string',
-          enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
+          enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
           description: 'Task priority level (default: LOW)',
         },
         category: {
@@ -74,7 +74,7 @@ const TOOLS = [
         },
         priority: {
           type: 'string',
-          enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
+          enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
           description: 'New priority level (optional)',
         },
         notes: {
@@ -143,7 +143,7 @@ const TOOLS = [
           type: 'array',
           items: {
             type: 'string',
-            enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
+            enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
           },
           description: 'Filter by one or more priority levels',
         },
